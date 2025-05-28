@@ -1,0 +1,180 @@
+LINUX QUICK START - Purple OS Testing
+=====================================
+
+FASTEST SETUP (Copy & Paste)
+----------------------------
+
+# 1. Install packages (Ubuntu/Debian)
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv ssh
+
+# 2. Setup project
+mkdir -p ~/purple_os_testing && cd ~/purple_os_testing
+
+# 3. Create virtual environment
+python3 -m venv venv && source venv/bin/activate
+
+# 4. Install Python packages
+pip install pyyaml jinja2
+
+# 5. Test SSH connection
+ssh root@192.168.1.1 "echo 'Connection OK'"
+
+# 6. Run tests
+python purple_os_test_native.py
+
+
+ONE-LINER SETUP
+---------------
+curl -sSL https://your-server/linux_quick_setup.sh | bash
+
+
+MINIMAL MANUAL SETUP
+--------------------
+cd ~
+git clone <your-repo> purple_os_testing
+cd purple_os_testing
+python3 -m venv venv
+source venv/bin/activate
+pip install pyyaml jinja2
+python purple_os_test_native.py
+
+
+SSH KEY SETUP (Recommended)
+---------------------------
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/purple_os_key -N ""
+ssh-copy-id -i ~/.ssh/purple_os_key.pub root@192.168.1.1
+echo "IdentityFile ~/.ssh/purple_os_key" >> ~/.ssh/config
+
+
+COMMON LINUX DISTRIBUTIONS
+--------------------------
+
+Ubuntu/Debian:
+    sudo apt install python3 python3-pip python3-venv ssh
+
+CentOS/RHEL 8+:
+    sudo dnf install python3 python3-pip openssh-clients
+
+Fedora:
+    sudo dnf install python3 python3-pip openssh-clients
+
+Arch Linux:
+    sudo pacman -S python python-pip openssh
+
+OpenSUSE:
+    sudo zypper install python3 python3-pip openssh
+
+
+RUN IN BACKGROUND
+-----------------
+# Using nohup
+nohup python purple_os_test_native.py > test.log 2>&1 &
+
+# Using screen
+screen -dmS purple-test python purple_os_test_native.py
+
+# Using tmux
+tmux new -d -s purple-test python purple_os_test_native.py
+
+
+CRON JOB SETUP
+--------------
+# Add to crontab
+crontab -e
+
+# Run daily at 2 AM
+0 2 * * * cd /home/user/purple_os_testing && /home/user/purple_os_testing/venv/bin/python purple_os_test_native.py
+
+# Run every 6 hours
+0 */6 * * * cd /home/user/purple_os_testing && ./run_tests.sh
+
+
+SYSTEMD TIMER (Better than cron)
+--------------------------------
+# Copy service files
+sudo cp systemd/purple-os-test.* /etc/systemd/system/
+
+# Enable and start timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now purple-os-test.timer
+
+# Check status
+sudo systemctl status purple-os-test.timer
+sudo journalctl -u purple-os-test.service
+
+
+DOCKER OPTION
+-------------
+# Create Dockerfile
+cat > Dockerfile << 'EOF'
+FROM python:3.9-slim
+RUN apt-get update && apt-get install -y ssh
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install pyyaml jinja2
+COPY purple_os_test_native.py .
+CMD ["python", "purple_os_test_native.py"]
+EOF
+
+# Build and run
+docker build -t purple-test .
+docker run --rm purple-test
+
+
+VIEW RESULTS
+------------
+# Latest HTML report
+ls -lt test_reports/*.html | head -1
+
+# View in terminal (install w3m or lynx)
+w3m test_reports/test_report_*.html
+lynx test_reports/test_report_*.html
+
+# Serve via HTTP
+cd test_reports && python3 -m http.server 8080
+# Browse to http://server-ip:8080
+
+
+TROUBLESHOOTING
+---------------
+
+1. Permission denied:
+   chmod +x run_tests.sh
+   chmod 600 ~/.ssh/purple_os_key
+
+2. Python not found:
+   alias python=python3
+   
+3. SSH timeout:
+   ssh -o ConnectTimeout=30 root@192.168.1.1
+
+4. Module not found:
+   source venv/bin/activate
+   pip install pyyaml jinja2
+
+
+MONITORING
+----------
+# Watch logs in real-time
+tail -f test_logs/purple_os_test_*.log
+
+# Check for errors
+grep -i error test_logs/*.log | less
+
+# Disk usage
+du -sh test_reports/ test_logs/ results/
+
+
+PERFORMANCE TIPS
+----------------
+# SSH multiplexing (add to ~/.ssh/config)
+Host *
+    ControlMaster auto
+    ControlPath ~/.ssh/control-%h-%p-%r
+    ControlPersist 10m
+
+# Increase file limits
+ulimit -n 4096
+
+# Run with more workers
+python purple_os_test_native.py --workers 20

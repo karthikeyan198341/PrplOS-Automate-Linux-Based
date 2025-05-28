@@ -1,0 +1,190 @@
+---
+# Ansible playbook for deploying Purple OS Testing Framework
+# Need to test the code
+# Usage: ansible-playbook -i inventory deploy_purple_test.yml
+
+- name: Deploy Purple OS Testing Framework
+  hosts: test_servers
+  become: yes
+  vars:
+    project_dir: /opt/purple_os_testing
+    test_user: purple-tester
+    device_ip: "{{ purple_device_ip | default('192.168.1.1') }}"
+    python_version: python3
+
+  tasks:
+    - name: Install system packages
+      package:
+        name:
+          - "{{ python_version }}"
+          - "{{ python_version }}-pip"
+          - "{{ python_version }}-venv"
+          - openssh-client
+          - git
+          - rsync
+        state: present
+
+    - name: Create test user
+      user:
+        name: "{{ test_user }}"
+        shell: /bin/bash
+        home: "/home/{{ test_user }}"
+        createhome: yes
+        state: present
+
+    - name: Create project directory
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0755'
+
+    - name: Create subdirectories
+      file:
+        path: "{{ project_dir }}/{{ item }}"
+        state: directory
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0755'
+      loop:
+        - test_logs
+        - test_reports
+        - test_dashboards
+        - results
+        - scripts
+
+    - name: Copy test framework
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/"
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0644'
+      loop:
+        - purple_os_test_native.py
+        - config.yaml
+
+    - name: Create virtual environment
+      become_user: "{{ test_user }}"
+      command: "{{ python_version }} -m venv {{ project_dir }}/venv"
+      args:
+        creates: "{{ project_dir }}/venv"
+
+    - name: Install Python packages
+      become_user: "{{ test_user }}"
+      pip:
+        name:
+          - pyyaml
+          - jinja2
+        virtualenv: "{{ project_dir }}/venv"
+
+    - name: Create run script
+      copy:
+        dest: "{{ project_dir }}/run_tests.sh"
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          cd {{ project_dir }}
+          source venv/bin/activate
+          python purple_os_test_native.py "$@"
+          deactivate
+
+    - name: Setup SSH key for test user
+      become_user: "{{ test_user }}"
+      openssh_keypair:
+        path: "/home/{{ test_user }}/.ssh/purple_os_key"
+        type: rsa
+        size: 4096
+        state: present
+
+    - name: Create SSH config
+      copy:
+        dest: "/home/{{ test_user }}/.ssh/config"
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0600'
+        content: |
+          Host purple-os
+              HostName {{ device_ip }}
+              User root
+              Port 22
+              IdentityFile ~/.ssh/purple_os_key
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+
+    - name: Create systemd service
+      copy:
+        dest: /etc/systemd/system/purple-os-test.service
+        content: |
+          [Unit]
+          Description=Purple OS Testing Service
+          After=network.target
+
+          [Service]
+          Type=oneshot
+          User={{ test_user }}
+          WorkingDirectory={{ project_dir }}
+          ExecStart={{ project_dir }}/run_tests.sh
+          StandardOutput=journal
+          StandardError=journal
+
+    - name: Create systemd timer
+      copy:
+        dest: /etc/systemd/system/purple-os-test.timer
+        content: |
+          [Unit]
+          Description=Run Purple OS tests every 6 hours
+          Requires=purple-os-test.service
+
+          [Timer]
+          OnBootSec=10min
+          OnUnitActiveSec=6h
+          
+          [Install]
+          WantedBy=timers.target
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start timer
+      systemd:
+        name: purple-os-test.timer
+        enabled: yes
+        state: started
+
+    - name: Create log rotation config
+      copy:
+        dest: /etc/logrotate.d/purple-os-test
+        content: |
+          {{ project_dir }}/test_logs/*.log {
+              daily
+              rotate 14
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0644 {{ test_user }} {{ test_user }}
+          }
+
+    - name: Display SSH public key
+      command: "cat /home/{{ test_user }}/.ssh/purple_os_key.pub"
+      register: ssh_pubkey
+      changed_when: false
+
+    - name: Show deployment info
+      debug:
+        msg:
+          - "Deployment completed!"
+          - "Project directory: {{ project_dir }}"
+          - "Test user: {{ test_user }}"
+          - "SSH public key to add to device:"
+          - "{{ ssh_pubkey.stdout }}"
+          - ""
+          - "Commands:"
+          - "  sudo -u {{ test_user }} {{ project_dir }}/run_tests.sh"
+          - "  systemctl status purple-os-test.timer"
+          - "  journalctl -u purple-os-test.service"

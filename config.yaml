@@ -1,0 +1,57 @@
+# Purple OS Test Configuration for Linux
+# You need to adjust with <your name> instead of build
+local_folder: "/home/build/purple_os_testing/results"
+
+device:
+  ip: "192.168.1.1"
+  username: "root"
+  port: 22
+
+execution:
+  max_workers: 10
+  timeout: 30
+
+tr181_parameters:
+  device_info:
+    - "Device.DeviceInfo.Manufacturer"
+    - "Device.DeviceInfo.ModelName"
+    - "Device.DeviceInfo.SerialNumber"
+    - "Device.DeviceInfo.SoftwareVersion"
+  network:
+    - "Device.LAN.IPAddress"
+    - "Device.LAN.SubnetMask"
+    - "Device.WiFi.Radio.1.Enable"
+
+log_collection:
+  enable_verbose: true
+  log_files:
+    - remote: "/var/log/messages"
+      local: "messages.log"
+    - remote: "/tmp/system.log"
+      local: "system.log"
+Step 7: Create Linux-Specific Scripts
+Test Runner Script (run_tests.sh):
+bash#!/bin/bash
+# Purple OS Test Runner for Linux
+
+# Activate virtual environment
+source ~/purple_os_testing/venv/bin/activate
+
+# Change to project directory
+cd ~/purple_os_testing
+
+# Run tests with timestamp
+timestamp=$(date +%Y%m%d_%H%M%S)
+log_file="logs/test_run_${timestamp}.log"
+
+# Create log directory
+mkdir -p logs
+
+# Run tests
+echo "Starting Purple OS tests at $(date)" | tee -a "$log_file"
+python purple_os_test_native.py "$@" 2>&1 | tee -a "$log_file"
+
+# Deactivate virtual environment
+deactivate
+
+echo "Tests completed at $(date)" | tee -a "$log_file"
